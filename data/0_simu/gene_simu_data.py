@@ -285,4 +285,4 @@ if __name__ == "__main__":
     # -- simple missing-value imputation -------------------------------------
     XM_filled = pd.DataFrame(XM).ffill().bfill().values
 
-    save_to_excel(XM_filled, YQ, filename="synthetic_mixed_data.xlsx")
+    save_to_excel(XM_filled, YQ, filename="data/0_simu/simu_data.xlsx")

@@ -1,0 +1,10 @@
+.venv/
+__pycache__/
+**/__pycache__/
+*.py[cod]
+.ipynb_checkpoints/
+.vscode/
+.env
+*.log
+energy_dataset.csv
+weather_features.csv
