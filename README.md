@@ -1,3 +1,4 @@
+<<<<<<< HEAD
 # MED: A Multi‐Encoder‐Decoder Architecture for Mixed‐frequency Data Forecasting
 
 ## Paper
@@ -108,3 +109,6 @@ python main.py --configs configs/1_fred/med_h32.yaml
 ## Acknowledgement
 The authors acknowledge financial support from the National Natural Science Foundation of China (No. 7237011356).
 
+=======
+# PDA_mid
+>>>>>>> 9a09e19a02b1de1e73a6b506fae56ca7cffdefb4
