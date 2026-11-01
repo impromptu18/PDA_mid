@@ -34,7 +34,30 @@ print("Weather shape:", weather.shape)
 
 
 # ============================================================
-# 3. XỬ LÝ THỜI GIAN
+# 3. LÀM SẠCH DỮ LIỆU NĂNG LƯỢNG (TỪ KAGGLE)
+# ============================================================
+
+print("\n" + "=" * 70)
+print("STEP 1.1 - CLEAN ENERGY DATASET (KAGGLE METHOD)")
+print("=" * 70)
+
+# 1. Loại bỏ các cột chỉ chứa toàn giá trị 0 hoặc NaN
+cols_to_drop = [col for col in energy.columns if energy[col].nunique() <= 1 or energy[col].isna().all()]
+if cols_to_drop:
+    print(f"Dropping constant/all-NaN columns: {cols_to_drop}")
+    energy = energy.drop(columns=cols_to_drop)
+
+# 2. Loại bỏ các cột dự báo day-ahead forecasts (nếu có trong bảng)
+day_ahead_cols = [col for col in energy.columns if "day-ahead" in col.lower()]
+if day_ahead_cols:
+    print(f"Dropping day-ahead forecast columns: {day_ahead_cols}")
+    energy = energy.drop(columns=day_ahead_cols)
+
+print("Energy shape after cleaning:", energy.shape)
+
+
+# ============================================================
+# 4. XỬ LÝ THỜI GIAN
 # ============================================================
 
 print("\n" + "=" * 70)
@@ -42,29 +65,23 @@ print("STEP 2 - PROCESS DATETIME")
 print("=" * 70)
 
 # utc=True xử lý được các timezone khác nhau trong dữ liệu
+# Chuẩn hóa cả hai chuỗi về UTC.
+# Loại bỏ thông tin timezone sau khi đã chuẩn hóa,
+# nhưng vẫn giữ nguyên thời gian UTC.
+
 energy["time"] = pd.to_datetime(
     energy["time"],
     utc=True
-)
+).dt.tz_localize(None)
 
 weather["dt_iso"] = pd.to_datetime(
     weather["dt_iso"],
     utc=True
-)
+).dt.tz_localize(None)
 
 # Chuyển về timezone của Tây Ban Nha.
 # Spain sử dụng CET/CEST và pandas sẽ tự xử lý DST.
-energy["time"] = (
-    energy["time"]
-    .dt.tz_convert("Europe/Madrid")
-    .dt.tz_localize(None)
-)
 
-weather["dt_iso"] = (
-    weather["dt_iso"]
-    .dt.tz_convert("Europe/Madrid")
-    .dt.tz_localize(None)
-)
 
 print("Energy time:")
 print(energy["time"].min(), "->", energy["time"].max())
@@ -74,7 +91,7 @@ print(weather["dt_iso"].min(), "->", weather["dt_iso"].max())
 
 
 # ============================================================
-# 4. XỬ LÝ TÊN THÀNH PHỐ
+# 5. XỬ LÝ TÊN THÀNH PHỐ
 # ============================================================
 
 print("\n" + "=" * 70)
@@ -97,7 +114,7 @@ for city in cities:
 
 
 # ============================================================
-# 5. CHỌN 10 BIẾN THỜI TIẾT
+# 6. CHỌN 10 BIẾN THỜI TIẾT
 # ============================================================
 
 print("\n" + "=" * 70)
@@ -114,12 +131,19 @@ print("Selected weather shape:", weather_selected.shape)
 
 
 # ============================================================
-# 6. TẠO 10 CỘT WEATHER
+# 7. TẠO 10 CỘT WEATHER
 # ============================================================
 
 print("\n" + "=" * 70)
 print("STEP 5 - CREATE 10 WEATHER FEATURES")
 print("=" * 70)
+
+# Kiểm tra bản ghi trùng theo thời gian và thành phố
+duplicate_weather = weather_selected.duplicated(
+    subset=["dt_iso", "city_name"]
+).sum()
+
+print("Weather duplicate records:", duplicate_weather)
 
 weather_wide = weather_selected.pivot_table(
     index="dt_iso",
@@ -153,7 +177,7 @@ print("Weather wide shape:", weather_wide.shape)
 
 
 # ============================================================
-# 7. XỬ LÝ MISSING WEATHER
+# 8. XỬ LÝ MISSING WEATHER
 # ============================================================
 
 print("\n" + "=" * 70)
@@ -170,8 +194,25 @@ print(
 )
 
 # Nội suy theo thời gian
-weather_wide = weather_wide.set_index("dt_iso")
+weather_wide = weather_wide.set_index("dt_iso").sort_index()
 
+# Tạo lưới thời gian UTC liên tục theo giờ
+full_weather_index = pd.date_range(
+    start=weather_wide.index.min(),
+    end=weather_wide.index.max(),
+    freq="1h"
+)
+
+# Đưa dữ liệu về lưới thời gian đầy đủ
+weather_wide = weather_wide.reindex(full_weather_index)
+weather_wide.index.name = "dt_iso"
+
+print(
+    "Weather missing before interpolation:",
+    weather_wide[weather_columns].isna().sum().sum()
+)
+
+# Nội suy các giá trị khí tượng bị thiếu
 weather_wide[weather_columns] = (
     weather_wide[weather_columns]
     .interpolate(method="time")
@@ -188,7 +229,7 @@ print(
 
 
 # ============================================================
-# 8. XỬ LÝ ELECTRICITY TARGET
+# 9. XỬ LÝ ELECTRICITY TARGET
 # ============================================================
 
 print("\n" + "=" * 70)
@@ -222,37 +263,65 @@ print(
 )
 
 
+
 # ============================================================
-# 9. HOURLY → 6-HOURLY
+# 10. HOURLY → 6-HOURLY
 # ============================================================
 
 print("\n" + "=" * 70)
 print("STEP 8 - CONVERT HOURLY TARGET TO 6-HOURLY")
 print("=" * 70)
 
-# Trung bình mỗi 6 giờ
-target_6h = (
+# Sắp xếp dữ liệu theo thời gian
+target_hourly = target_hourly.sort_index()
+
+# Kiểm tra timestamp trùng
+if target_hourly.index.has_duplicates:
+    raise ValueError("Target hourly có timestamp bị trùng.")
+
+# Kiểm tra số quan sát trong từng khoảng 6 giờ.
+# origin="start" căn khoảng tổng hợp từ timestamp đầu tiên.
+target_6h_stats = (
     target_hourly[target_col]
-    .resample("6h")
-    .mean()
-    .to_frame()
+    .resample("6h", origin="start")
+    .agg(["mean", "count"])
 )
 
-# Đổi tên theo config của repo
-target_6h = target_6h.rename(
-    columns={
-        target_col: "load_actual"
-    }
+print("Số lượng quan sát trong mỗi khoảng 6 giờ:")
+print(target_6h_stats["count"].value_counts().sort_index())
+
+# Không chấp nhận các khoảng có ít hoặc nhiều hơn 6 quan sát
+invalid_bins = target_6h_stats[
+    target_6h_stats["count"] != 6
+]
+
+if not invalid_bins.empty:
+    print("\nCác khoảng 6 giờ không đủ 6 quan sát:")
+    print(invalid_bins.head(10))
+
+    raise ValueError(
+        "Có khoảng tổng hợp không chứa đúng 6 quan sát. "
+        "Cần kiểm tra dữ liệu hourly trước khi tiếp tục."
+    )
+
+# Lấy giá trị trung bình của 6 quan sát trong mỗi khoảng
+target_6h = (
+    target_6h_stats[["mean"]]
+    .rename(columns={"mean": "load_actual"})
 )
 
-print("6-hourly target shape:", target_6h.shape)
+print("\n6-hourly target shape:", target_6h.shape)
 
 print("\nFirst 5 target values:")
 print(target_6h.head())
 
+print("\nLast 5 target values:")
+print(target_6h.tail())
+
+
 
 # ============================================================
-# 10. CHUẨN BỊ SHEET x
+# 11. CHUẨN BỊ SHEET x
 # ============================================================
 
 print("\n" + "=" * 70)
@@ -278,7 +347,7 @@ print("X columns:", list(x.columns))
 
 
 # ============================================================
-# 11. CHUẨN BỊ SHEET y
+# 12. CHUẨN BỊ SHEET y
 # ============================================================
 
 print("\n" + "=" * 70)
@@ -302,7 +371,7 @@ print("Y columns:", list(y.columns))
 
 
 # ============================================================
-# 12. TẠO THƯ MỤC
+# 13. TẠO THƯ MỤC
 # ============================================================
 
 OUTPUT_DIR.mkdir(
@@ -312,7 +381,7 @@ OUTPUT_DIR.mkdir(
 
 
 # ============================================================
-# 13. GHI EXCEL
+# 14. GHI EXCEL
 # ============================================================
 
 print("\n" + "=" * 70)
@@ -336,7 +405,7 @@ with pd.ExcelWriter(
 
 
 # ============================================================
-# 14. KIỂM TRA CUỐI
+# 15. KIỂM TRA CUỐI
 # ============================================================
 
 print("\n" + "=" * 70)
