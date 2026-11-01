@@ -124,7 +124,7 @@ class MEDModel:  # pylint: disable=too-many-instance-attributes
                 batch_size=self.batch_size,
                 shuffle=False,
             )
-            best_val = float("inf")
+
             patience_ctr = 0
             for epoch in range(1, self.epoch + 1):
                 # ---- train one epoch ---- #
@@ -142,17 +142,15 @@ class MEDModel:  # pylint: disable=too-many-instance-attributes
                     )
 
                 # early stopping
-                if self.args.early_stopping:
-                    if val_total < best_val:
-                        best_val = val_total
-                        patience_ctr = 0
-                    else:
-                        patience_ctr += 1
-
-                    if patience_ctr >= patience:
-                        if self.args.verbose:
-                            print(f"Fold {fold}: early stop @ epoch {epoch}")
-                        break
+                if val_total < best_val:
+                    best_val = val_total
+                    patience_ctr = 0
+                else:
+                    patience_ctr += 1
+                if patience_ctr >= patience:
+                    if self.args.verbose:
+                        print(f"Fold {fold}: early stop @ epoch {epoch}")
+                    break
 
     # ------------------------------------------------------------------
     # TEST / INFERENCE
